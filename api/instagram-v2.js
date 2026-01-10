@@ -1,13 +1,41 @@
-import express from 'express';
 import axios from 'axios';
 import * as cheerio from 'cheerio';
 
-const router = express.Router();
+export default async function handler(req, res) {
+  // Only POST allowed
+  if (req.method !== 'POST') {
+    return res.status(405).json({ status: false, message: 'Method not allowed' });
+  }
 
-// Instagram scraping function for profile pic, story, and reel download
-async function indown(url) {
   try {
-    // Request the page to get necessary cookies and token
+    const { url, apikey } = req.body;
+
+    // API key check
+    if (!apikey) {
+      return res.status(401).json({
+        status: false,
+        message: 'API key is required'
+      });
+    }
+
+    if (apikey !== 'eypz-pvt') {
+      return res.status(403).json({
+        status: false,
+        message: 'Invalid API key'
+      });
+    }
+
+    // URL validation for Instagram URL
+    if (!url || !url.includes('instagram.com')) {
+      return res.status(400).json({
+        status: false,
+        message: 'Invalid Instagram URL'
+      });
+    }
+
+    /* ===============================
+       STEP 1: GET COOKIES AND CSRF TOKEN FROM INSTAGRAM
+    =============================== */
     const get = await axios.get('https://indown.io/en1');
     const kukis = get.headers['set-cookie']
       .map(v => v.split(';')[0])
@@ -16,8 +44,11 @@ async function indown(url) {
     // Extract the CSRF token from the page
     const t = cheerio.load(get.data)('input[name="_token"]').val();
 
-    // Post the download request with the necessary parameters
-    const dl = await axios.post('https://indown.io/download',
+    /* ===============================
+       STEP 2: SCRAPE MEDIA URL USING INDOWN
+    =============================== */
+    const dl = await axios.post(
+      'https://indown.io/download',
       new URLSearchParams({
         referer: 'https://indown.io/en1',
         locale: 'en',
@@ -32,7 +63,8 @@ async function indown(url) {
           referer: 'https://indown.io/en1',
           cookie: kukis,
           'user-agent': 'Mozilla/5.0'
-        }
+        },
+        timeout: 20000
       }
     );
 
@@ -51,63 +83,32 @@ async function indown(url) {
         return v && a.indexOf(v) === i;
       })[0];
 
-    return { url: u || null };
-
-  } catch (e) {
-    throw new Error('Error fetching Instagram media: ' + e.message);
-  }
-}
-
-// Define the route for Instagram media download
-router.get('/instagram-v2', async (req, res) => {
-  const { url, apikey } = req.query;
-
-  // Validate API key
-  if (!apikey) {
-    return res.status(401).json({
-      status: false,
-      message: "API key is required"
-    });
-  }
-
-  if (apikey !== "eypz-pvt") {
-    return res.status(403).json({
-      status: false,
-      message: "Invalid API key"
-    });
-  }
-
-  // Validate URL
-  if (!url) {
-    return res.status(400).json({
-      status: false,
-      message: "URL is required",
-      example: "/instagram-v2?url=INSTAGRAM_URL&apikey=eypz-pvt"
-    });
-  }
-
-  try {
-    const result = await indown(url);
-    if (!result.url) throw new Error("Failed to fetch media");
+    // If no media URL was found, return an error
+    if (!u) {
+      return res.status(404).json({
+        status: false,
+        message: 'Failed to fetch Instagram media'
+      });
+    }
 
     // Determine the media type based on URL
-    const mediaType = /reel/.test(url) ? 'reel' :
-                      /story/.test(url) ? 'story' :
-                      'profile_picture'; // Default to profile picture
+    const mediaType = /reel/.test(url)
+      ? 'reel'
+      : /story/.test(url)
+      ? 'story'
+      : 'profile_picture'; // Default to profile picture
 
-    res.json({
+    return res.status(200).json({
       status: true,
       media_type: mediaType,
-      media_url: result.url,
-      creator: "Akshay-Eypz"
+      media_url: u,
+      creator: 'Akshay-Eypz'
     });
 
   } catch (err) {
     return res.status(500).json({
       status: false,
-      message: err.message
+      message: err.message || 'Internal server error'
     });
   }
-});
-
-export default router;
+      }
